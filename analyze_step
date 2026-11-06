@@ -1,0 +1,47 @@
+"""Fits a first-order step response to logged CPU temperature data."""
+
+import matplotlib
+
+matplotlib.use("Agg")  # No display on a headless Pi; render to file.
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy.optimize import curve_fit
+
+DATA_FILE = "/home/radu/data/step.csv"
+PLOT_FILE = "/home/radu/data/step_fit.png"
+FIT_WINDOW_S = 720  # Baseline (120 s) + load phase (600 s).
+
+
+def first_order_step(t, temp_ambient, gain, tau, t_step):
+    """Returns the first-order step response T(t) = T0 + K(1 - e^(-(t - t0)/tau))."""
+    elapsed = np.clip(t - t_step, 0, None)
+    return temp_ambient + gain * (1 - np.exp(-elapsed / tau))
+
+
+def main():
+    df = pd.read_csv(DATA_FILE, parse_dates=["timestamp"])
+    df["t"] = (df["timestamp"] - df["timestamp"].iloc[0]).dt.total_seconds()
+    heating = df[df["t"] <= FIT_WINDOW_S]
+
+    p0 = [heating["cpu_temp_c"].iloc[0], 10.0, 60.0, 120.0]
+    params, _ = curve_fit(first_order_step, heating["t"], heating["cpu_temp_c"], p0=p0)
+    temp_ambient, gain, tau, t_step = params
+    print(f"T0 = {temp_ambient:.1f} °C, K = {gain:.1f} °C, "
+          f"tau = {tau:.0f} s, step at t = {t_step:.0f} s")
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(df["t"], df["cpu_temp_c"], ".", markersize=3, label="Measured")
+    plt.plot(heating["t"], first_order_step(heating["t"], *params), label="First-order fit")
+    plt.xlabel("Time [s]")
+    plt.ylabel("CPU temperature [°C]")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(PLOT_FILE, dpi=120)
+    print(f"Plot saved to {PLOT_FILE}")
+
+
+if __name__ == "__main__":
+    main()
